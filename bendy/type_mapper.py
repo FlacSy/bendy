@@ -1,5 +1,6 @@
 import datetime
 import inspect
+import types
 from decimal import Decimal
 from enum import Enum
 from typing import Union, get_args, get_origin
@@ -41,9 +42,10 @@ def resolve_field(name: str, type_hint, raw_default) -> FieldInfo:
 
     nullable = False
     origin = get_origin(type_hint)
-    if origin is Union:
-        inner = [a for a in get_args(type_hint) if a is not type(None)]
-        if len(inner) == 1 and type(None) in get_args(type_hint):
+    if origin is Union or isinstance(type_hint, types.UnionType):
+        args = get_args(type_hint)
+        inner = [a for a in args if a is not type(None)]
+        if len(inner) == 1 and type(None) in args:
             type_hint = inner[0]
             nullable = True
 

@@ -1,4 +1,4 @@
-# Bendy
+# Bendykit
 
 Code generator for Python backends following DDD principles.
 
@@ -7,7 +7,7 @@ Describe your domain in a single Python file, get a full stack: domain models, r
 ## Installation
 
 ```bash
-pip install bendy
+pip install bendykit
 ```
 
 ## Usage
@@ -46,7 +46,7 @@ class Order(Aggregate):
 ```
 
 ```bash
-bendy manifest.py ./src
+bendykit manifest.py ./src
 ```
 
 Generates for each aggregate:
@@ -95,7 +95,7 @@ src/order/
 
 - [x] Phase I — CLI generator
 - [x] Phase II — Python manifests (Enum, ValueObject, Field, auto_now, Meta)
-- [ ] Phase III — `bendy.runtime`: Unit of Work, Domain Events
+- [ ] Phase III — `bendykit.runtime`: Unit of Work, Domain Events
 
 ## License
 
