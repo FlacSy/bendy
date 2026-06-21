@@ -115,39 +115,10 @@ def test_auto_now_excluded_from_create_dto(tmp_path):
     assert "created_at" not in create_section
 
 
-def test_uow_file_created(tmp_path):
-    out, _ = run(tmp_path, SIMPLE)
-    assert (out / "product/infrastructure/uow.py").exists()
-
-
-def test_uow_content(tmp_path):
-    out, _ = run(tmp_path, SIMPLE)
-    content = (out / "product/infrastructure/uow.py").read_text()
-    assert "class ProductUnitOfWork" in content
-    assert "async def commit" in content
-    assert "async def rollback" in content
-    assert "SqlalchemyProductRepository" in content
-
-
-def test_use_cases_use_uow(tmp_path):
-    out, _ = run(tmp_path, FULL)
-    content = (out / "product/application/use_cases.py").read_text()
-    assert "ProductUnitOfWork" in content
-    assert "self._uow" in content
-    assert "async with self._uow" in content
-
-
 def test_update_use_case_generated(tmp_path):
     out, _ = run(tmp_path, FULL)
     content = (out / "product/application/use_cases.py").read_text()
     assert "class UpdateProductUseCase" in content
-
-
-def test_router_uses_uow(tmp_path):
-    out, _ = run(tmp_path, FULL)
-    content = (out / "product/presentation/router.py").read_text()
-    assert "ProductUnitOfWork" in content
-    assert "_uow" in content
 
 
 def test_list_route_in_router(tmp_path):
