@@ -1,0 +1,31 @@
+from dataclasses import dataclass, field
+from uuid import UUID, uuid4
+{%- if 'datetime' in extra_imports %}
+from datetime import datetime
+{%- endif %}
+{%- if 'date' in extra_imports %}
+from datetime import date
+{%- endif %}
+{%- if 'Decimal' in extra_imports %}
+from decimal import Decimal
+{%- endif %}
+{%- if has_optional %}
+from typing import Optional
+{%- endif %}
+{%- if enums %}
+from .enums import {{ enums | map(attribute='name') | join(', ') }}
+{%- endif %}
+{%- if value_objects %}
+from .value_objects import {{ value_objects | map(attribute='name') | join(', ') }}
+{%- endif %}
+
+
+@dataclass
+class {{ domain_name|capitalize }}:
+{%- for f in required_fields %}
+    {{ f.name }}: {{ f.python_type }}
+{%- endfor %}
+{%- for f in optional_fields %}
+    {{ f.name }}: {{ f.python_type }} = {{ f.default_repr }}
+{%- endfor %}
+    id: UUID = field(default_factory=uuid4)

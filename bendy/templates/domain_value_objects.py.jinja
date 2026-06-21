@@ -1,0 +1,21 @@
+from dataclasses import dataclass
+{%- if vo_has_optional %}
+from typing import Optional
+{%- endif %}
+{%- if vo_extra_imports %}
+{% for imp in vo_extra_imports %}
+from {{ imp.module }} import {{ imp.name }}
+{%- endfor %}
+{%- endif %}
+{% for vo in value_objects %}
+
+
+@dataclass(frozen=True)
+class {{ vo.name }}:
+{%- for f in vo.required_fields %}
+    {{ f.name }}: {{ f.python_type }}
+{%- endfor %}
+{%- for f in vo.optional_fields %}
+    {{ f.name }}: {{ f.python_type }} = {{ f.default_repr }}
+{%- endfor %}
+{% endfor %}

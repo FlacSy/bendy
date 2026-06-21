@@ -1,0 +1,25 @@
+from abc import ABC, abstractmethod
+from uuid import UUID
+from typing import Optional
+
+from .models import {{ domain_name|capitalize }}
+
+
+class {{ domain_name|capitalize }}Repository(ABC):
+    @abstractmethod
+    async def get_by_id(self, id: UUID) -> Optional[{{ domain_name|capitalize }}]:
+        ...
+
+    @abstractmethod
+    async def save(self, entity: {{ domain_name|capitalize }}) -> None:
+        ...
+
+    @abstractmethod
+    async def delete(self, id: UUID) -> None:
+        ...
+{%- if 'list' in use_cases %}
+
+    @abstractmethod
+    async def list(self) -> list[{{ domain_name|capitalize }}]:
+        ...
+{%- endif %}

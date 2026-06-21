@@ -1,0 +1,79 @@
+import dataclasses
+from uuid import UUID
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ...domain.models import {{ domain_name|capitalize }}
+from ...domain.repository import {{ domain_name|capitalize }}Repository
+from .models import {{ domain_name|capitalize }}Model
+{%- if enums %}
+from ...domain.enums import {{ enums | map(attribute='name') | join(', ') }}
+{%- endif %}
+{%- if value_objects %}
+from ...domain.value_objects import {{ value_objects | map(attribute='name') | join(', ') }}
+{%- endif %}
+
+
+class Sqlalchemy{{ domain_name|capitalize }}Repository({{ domain_name|capitalize }}Repository):
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_by_id(self, id: UUID) -> Optional[{{ domain_name|capitalize }}]:
+        result = await self._session.execute(
+            select({{ domain_name|capitalize }}Model).where({{ domain_name|capitalize }}Model.id == str(id))
+        )
+        row = result.scalar_one_or_none()
+        return self._to_domain(row) if row else None
+
+    async def save(self, entity: {{ domain_name|capitalize }}) -> None:
+        await self._session.merge(self._to_model(entity))
+
+    async def delete(self, id: UUID) -> None:
+        row = await self._session.get({{ domain_name|capitalize }}Model, str(id))
+        if row:
+            await self._session.delete(row)
+{%- if 'list' in use_cases %}
+
+    async def list(self) -> list[{{ domain_name|capitalize }}]:
+        result = await self._session.execute(select({{ domain_name|capitalize }}Model))
+        return [self._to_domain(row) for row in result.scalars()]
+{%- endif %}
+
+    def _to_domain(self, row: {{ domain_name|capitalize }}Model) -> {{ domain_name|capitalize }}:
+        return {{ domain_name|capitalize }}(
+{%- for f in required_fields %}
+{%- if f.is_enum %}
+            {{ f.name }}={{ f.enum_class_name }}(row.{{ f.name }}),
+{%- elif f.is_value_object %}
+            {{ f.name }}={{ f.vo_class_name }}(**row.{{ f.name }}),
+{%- else %}
+            {{ f.name }}=row.{{ f.name }},
+{%- endif %}
+{%- endfor %}
+{%- for f in optional_fields %}
+{%- if f.is_enum %}
+            {{ f.name }}={{ f.enum_class_name }}(row.{{ f.name }}) if row.{{ f.name }} is not None else None,
+{%- elif f.is_value_object %}
+            {{ f.name }}={{ f.vo_class_name }}(**row.{{ f.name }}) if row.{{ f.name }} is not None else None,
+{%- else %}
+            {{ f.name }}=row.{{ f.name }},
+{%- endif %}
+{%- endfor %}
+            id=UUID(row.id),
+        )
+
+    def _to_model(self, entity: {{ domain_name|capitalize }}) -> {{ domain_name|capitalize }}Model:
+        return {{ domain_name|capitalize }}Model(
+            id=str(entity.id),
+{%- for f in fields %}
+{%- if f.is_enum %}
+            {{ f.name }}=entity.{{ f.name }}.value if entity.{{ f.name }} is not None else None,
+{%- elif f.is_value_object %}
+            {{ f.name }}=dataclasses.asdict(entity.{{ f.name }}) if entity.{{ f.name }} is not None else None,
+{%- else %}
+            {{ f.name }}=entity.{{ f.name }},
+{%- endif %}
+{%- endfor %}
+        )

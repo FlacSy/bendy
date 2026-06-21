@@ -1,0 +1,73 @@
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from shared.database import get_session
+from ..application.dtos import (
+    {{ domain_name|capitalize }}Create,
+{%- if 'update' in use_cases %}
+    {{ domain_name|capitalize }}Update,
+{%- endif %}
+    {{ domain_name|capitalize }}Response,
+)
+from ..application.use_cases import (
+{%- if 'create' in use_cases %}
+    Create{{ domain_name|capitalize }}UseCase,
+{%- endif %}
+{%- if 'get' in use_cases %}
+    Get{{ domain_name|capitalize }}UseCase,
+{%- endif %}
+{%- if 'update' in use_cases %}
+    Update{{ domain_name|capitalize }}UseCase,
+{%- endif %}
+{%- if 'delete' in use_cases %}
+    Delete{{ domain_name|capitalize }}UseCase,
+{%- endif %}
+{%- if 'list' in use_cases %}
+    List{{ domain_name|capitalize }}sUseCase,
+{%- endif %}
+)
+from ..infrastructure.repository import Sqlalchemy{{ domain_name|capitalize }}Repository
+
+router = APIRouter(prefix="/{{ domain_name }}s", tags=["{{ domain_name|capitalize }}"])
+
+
+def _repo(session: AsyncSession = Depends(get_session)) -> Sqlalchemy{{ domain_name|capitalize }}Repository:
+    return Sqlalchemy{{ domain_name|capitalize }}Repository(session)
+
+{%- if 'list' in use_cases %}
+
+
+@router.get("/", response_model=list[{{ domain_name|capitalize }}Response])
+async def list_{{ domain_name }}s(repo=Depends(_repo)):
+    return await List{{ domain_name|capitalize }}sUseCase(repo).execute()
+{%- endif %}
+{%- if 'create' in use_cases %}
+
+
+@router.post("/", response_model={{ domain_name|capitalize }}Response, status_code=status.HTTP_201_CREATED)
+async def create_{{ domain_name }}(data: {{ domain_name|capitalize }}Create, repo=Depends(_repo)):
+    return await Create{{ domain_name|capitalize }}UseCase(repo).execute(data)
+{%- endif %}
+{%- if 'get' in use_cases %}
+
+
+@router.get("/{id}", response_model={{ domain_name|capitalize }}Response)
+async def get_{{ domain_name }}(id: UUID, repo=Depends(_repo)):
+    return await Get{{ domain_name|capitalize }}UseCase(repo).execute(id)
+{%- endif %}
+{%- if 'update' in use_cases %}
+
+
+@router.patch("/{id}", response_model={{ domain_name|capitalize }}Response)
+async def update_{{ domain_name }}(id: UUID, data: {{ domain_name|capitalize }}Update, repo=Depends(_repo)):
+    return await Update{{ domain_name|capitalize }}UseCase(repo).execute(id, data)
+{%- endif %}
+{%- if 'delete' in use_cases %}
+
+
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_{{ domain_name }}(id: UUID, repo=Depends(_repo)):
+    await Delete{{ domain_name|capitalize }}UseCase(repo).execute(id)
+{%- endif %}

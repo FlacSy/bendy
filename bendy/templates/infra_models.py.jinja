@@ -1,0 +1,25 @@
+from sqlalchemy import {{ sa_imports | join(', ') }}
+from sqlalchemy.orm import Mapped, mapped_column
+{%- if 'datetime' in extra_imports %}
+from datetime import datetime
+{%- endif %}
+{%- if 'date' in extra_imports %}
+from datetime import date
+{%- endif %}
+{%- if 'Decimal' in extra_imports %}
+from decimal import Decimal
+{%- endif %}
+{%- if has_optional or value_objects %}
+from typing import Optional
+{%- endif %}
+
+from shared.database import Base
+
+
+class {{ domain_name|capitalize }}Model(Base):
+    __tablename__ = "{{ domain_name }}s"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+{%- for f in fields %}
+    {{ f.name }}: Mapped[{{ f.sa_mapped_type }}] = mapped_column({{ f.sa_column_type }}{% if f.max_length %}({{ f.max_length }}){% endif %}{% if f.nullable %}, nullable=True{% endif %}{% if f.unique %}, unique=True{% endif %}{% if f.index %}, index=True{% endif %}{% if f.has_default and f.default_repr != 'None' and not f.is_enum %}, default={{ f.default_repr }}{% endif %})
+{%- endfor %}

@@ -1,0 +1,9 @@
+from enum import Enum
+{% for enum in enums %}
+
+
+class {{ enum.name }}(Enum):
+{%- for member_name, value in enum.values %}
+    {{ member_name }} = {{ value | repr }}
+{%- endfor %}
+{% endfor %}
