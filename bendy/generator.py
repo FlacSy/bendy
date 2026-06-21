@@ -15,6 +15,7 @@ _AGGREGATE_TEMPLATES = {
     "router.py.jinja": "presentation/router.py",
     "infra_models.py.jinja": "infrastructure/models.py",
     "infra_repository.py.jinja": "infrastructure/repository.py",
+    "infra_uow.py.jinja": "infrastructure/uow.py",
 }
 
 _DATETIME_IMPORTS = {"datetime", "date"}

@@ -7,7 +7,6 @@ from dataclasses import replace
 {%- endif %}
 
 from ..domain.models import {{ domain_name|capitalize }}
-from ..domain.repository import {{ domain_name|capitalize }}Repository
 from .dtos import (
     {{ domain_name|capitalize }}Create,
 {%- if 'update' in use_cases %}
@@ -15,77 +14,86 @@ from .dtos import (
 {%- endif %}
     {{ domain_name|capitalize }}Response,
 )
+from ..infrastructure.uow import {{ domain_name|capitalize }}UnitOfWork
 {%- if 'create' in use_cases %}
 
 
 class Create{{ domain_name|capitalize }}UseCase:
-    def __init__(self, repository: {{ domain_name|capitalize }}Repository) -> None:
-        self._repository = repository
+    def __init__(self, uow: {{ domain_name|capitalize }}UnitOfWork) -> None:
+        self._uow = uow
 
     async def execute(self, data: {{ domain_name|capitalize }}Create) -> {{ domain_name|capitalize }}Response:
-        entity = {{ domain_name|capitalize }}(
+        async with self._uow:
+            entity = {{ domain_name|capitalize }}(
 {%- for f in required_fields if not f.auto_now %}
-            {{ f.name }}=data.{{ f.name }},
+                {{ f.name }}=data.{{ f.name }},
 {%- endfor %}
 {%- for f in auto_now_fields %}
-            {{ f.name }}=datetime.now(timezone.utc),
+                {{ f.name }}=datetime.now(timezone.utc),
 {%- endfor %}
 {%- for f in optional_fields if not f.auto_now %}
-            {{ f.name }}=data.{{ f.name }},
+                {{ f.name }}=data.{{ f.name }},
 {%- endfor %}
-        )
-        await self._repository.save(entity)
-        return {{ domain_name|capitalize }}Response.model_validate(entity)
+            )
+            await self._uow.{{ domain_name }}s.save(entity)
+            await self._uow.commit()
+            return {{ domain_name|capitalize }}Response.model_validate(entity)
 {%- endif %}
 {%- if 'get' in use_cases %}
 
 
 class Get{{ domain_name|capitalize }}UseCase:
-    def __init__(self, repository: {{ domain_name|capitalize }}Repository) -> None:
-        self._repository = repository
+    def __init__(self, uow: {{ domain_name|capitalize }}UnitOfWork) -> None:
+        self._uow = uow
 
     async def execute(self, id: UUID) -> {{ domain_name|capitalize }}Response:
-        entity = await self._repository.get_by_id(id)
-        if entity is None:
-            raise ValueError(f"{{ domain_name|capitalize }} {id} not found")
-        return {{ domain_name|capitalize }}Response.model_validate(entity)
+        async with self._uow:
+            entity = await self._uow.{{ domain_name }}s.get_by_id(id)
+            if entity is None:
+                raise ValueError(f"{{ domain_name|capitalize }} {id} not found")
+            return {{ domain_name|capitalize }}Response.model_validate(entity)
 {%- endif %}
 {%- if 'update' in use_cases %}
 
 
 class Update{{ domain_name|capitalize }}UseCase:
-    def __init__(self, repository: {{ domain_name|capitalize }}Repository) -> None:
-        self._repository = repository
+    def __init__(self, uow: {{ domain_name|capitalize }}UnitOfWork) -> None:
+        self._uow = uow
 
     async def execute(self, id: UUID, data: {{ domain_name|capitalize }}Update) -> {{ domain_name|capitalize }}Response:
-        entity = await self._repository.get_by_id(id)
-        if entity is None:
-            raise ValueError(f"{{ domain_name|capitalize }} {id} not found")
-        updated = replace(entity, **data.model_dump(exclude_unset=True))
-        await self._repository.save(updated)
-        return {{ domain_name|capitalize }}Response.model_validate(updated)
+        async with self._uow:
+            entity = await self._uow.{{ domain_name }}s.get_by_id(id)
+            if entity is None:
+                raise ValueError(f"{{ domain_name|capitalize }} {id} not found")
+            updated = replace(entity, **data.model_dump(exclude_unset=True))
+            await self._uow.{{ domain_name }}s.save(updated)
+            await self._uow.commit()
+            return {{ domain_name|capitalize }}Response.model_validate(updated)
 {%- endif %}
 {%- if 'delete' in use_cases %}
 
 
 class Delete{{ domain_name|capitalize }}UseCase:
-    def __init__(self, repository: {{ domain_name|capitalize }}Repository) -> None:
-        self._repository = repository
+    def __init__(self, uow: {{ domain_name|capitalize }}UnitOfWork) -> None:
+        self._uow = uow
 
     async def execute(self, id: UUID) -> None:
-        entity = await self._repository.get_by_id(id)
-        if entity is None:
-            raise ValueError(f"{{ domain_name|capitalize }} {id} not found")
-        await self._repository.delete(id)
+        async with self._uow:
+            entity = await self._uow.{{ domain_name }}s.get_by_id(id)
+            if entity is None:
+                raise ValueError(f"{{ domain_name|capitalize }} {id} not found")
+            await self._uow.{{ domain_name }}s.delete(id)
+            await self._uow.commit()
 {%- endif %}
 {%- if 'list' in use_cases %}
 
 
 class List{{ domain_name|capitalize }}sUseCase:
-    def __init__(self, repository: {{ domain_name|capitalize }}Repository) -> None:
-        self._repository = repository
+    def __init__(self, uow: {{ domain_name|capitalize }}UnitOfWork) -> None:
+        self._uow = uow
 
     async def execute(self) -> list[{{ domain_name|capitalize }}Response]:
-        entities = await self._repository.list()
-        return [{{ domain_name|capitalize }}Response.model_validate(e) for e in entities]
+        async with self._uow:
+            entities = await self._uow.{{ domain_name }}s.list()
+            return [{{ domain_name|capitalize }}Response.model_validate(e) for e in entities]
 {%- endif %}
