@@ -7,7 +7,7 @@ name = "bendykit"
 version = "0.1.0"
 description = "DDD scaffolding framework and code generator for Python backends"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "jinja2>=3.1",
