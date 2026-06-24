@@ -16,7 +16,11 @@ def run(tmp_path: Path, content: str) -> tuple[Path, list[str]]:
     result = read_manifest(p)
     assert not result.errors, result.errors
     out = tmp_path / "out"
-    return out, generate(result, out)
+    agg_results = generate(result, out)
+    errors = [
+        f"{fr.relative_path}: {fr.error}" for ar in agg_results for fr in ar.files if fr.error
+    ]
+    return out, errors
 
 
 SIMPLE = """
