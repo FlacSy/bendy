@@ -1,7 +1,7 @@
 import ast
 from pathlib import Path
 
-from bendy.generator import _AGGREGATE_TEMPLATES, generate
+from bendy.generator import _AGGREGATE_TEMPLATES, _CONDITIONAL_TEMPLATES, generate
 from bendy.reader import read_manifest
 
 
@@ -63,12 +63,57 @@ class Product(Aggregate):
         use_cases = ["create", "get", "update", "delete", "list"]
 """
 
+WITH_UUID = """
+from uuid import UUID
+
+from bendy import Aggregate
+
+class Order(Aggregate):
+    customer_id: UUID
+    total: float
+"""
+
 
 def test_all_files_created(tmp_path):
     out, errors = run(tmp_path, SIMPLE)
     assert not errors
-    for path in _AGGREGATE_TEMPLATES.values():
+    for name, path in _AGGREGATE_TEMPLATES.items():
+        if name in _CONDITIONAL_TEMPLATES:
+            continue  # SIMPLE has no enums — domain/enums.py is not emitted
         assert (out / "product" / path).exists()
+
+
+def test_enums_file_only_created_when_enums_present(tmp_path):
+    out, _ = run(tmp_path, SIMPLE)
+    assert not (out / "product" / "domain" / "enums.py").exists()
+
+    out, _ = run(tmp_path, FULL)
+    assert (out / "product" / "domain" / "enums.py").exists()
+
+
+def test_enum_file_content(tmp_path):
+    out, _ = run(tmp_path, FULL)
+    content = (out / "product/domain/enums.py").read_text()
+    assert "class Status(Enum):" in content
+    assert "ACTIVE = 'active'" in content
+    assert "ARCHIVED = 'archived'" in content
+
+
+def test_infra_repository_relative_imports_are_valid(tmp_path):
+    out, _ = run(tmp_path, FULL)
+    content = (out / "product/infrastructure/repository.py").read_text()
+    assert "from ...domain" not in content
+    assert "from ..domain.models import Product" in content
+    assert "from ..domain.repository import ProductRepository" in content
+    assert "from ..domain.enums import Status" in content
+
+
+def test_infra_models_uuid_import(tmp_path):
+    out, errors = run(tmp_path, WITH_UUID)
+    assert not errors
+    content = (out / "order/infrastructure/models.py").read_text()
+    assert "from uuid import UUID" in content
+    assert "customer_id: Mapped[UUID]" in content
 
 
 def test_generated_files_are_valid_python(tmp_path):

@@ -5,14 +5,14 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...domain.models import {{ domain_name|capitalize }}
-from ...domain.repository import {{ domain_name|capitalize }}Repository
+from ..domain.models import {{ domain_name|capitalize }}
+from ..domain.repository import {{ domain_name|capitalize }}Repository
 from .models import {{ domain_name|capitalize }}Model
 {%- if enums %}
-from ...domain.enums import {{ enums | map(attribute='name') | join(', ') }}
+from ..domain.enums import {{ enums | map(attribute='name') | join(', ') }}
 {%- endif %}
 {%- if value_objects %}
-from ...domain.value_objects import {{ value_objects | map(attribute='name') | join(', ') }}
+from ..domain.value_objects import {{ value_objects | map(attribute='name') | join(', ') }}
 {%- endif %}
 
 

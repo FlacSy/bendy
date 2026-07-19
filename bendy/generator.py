@@ -14,6 +14,7 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 _AGGREGATE_TEMPLATES = {
     "domain_models.py.jinja": "domain/models.py",
+    "domain_enums.py.jinja": "domain/enums.py",
     "domain_repository.py.jinja": "domain/repository.py",
     "app_dtos.py.jinja": "application/dtos.py",
     "app_use_cases.py.jinja": "application/use_cases.py",
@@ -21,6 +22,9 @@ _AGGREGATE_TEMPLATES = {
     "infra_models.py.jinja": "infrastructure/models.py",
     "infra_repository.py.jinja": "infrastructure/repository.py",
 }
+
+# rendered only for aggregates that actually declare enum fields
+_CONDITIONAL_TEMPLATES = {"domain_enums.py.jinja"}
 
 # soft-merge preserves user logic; everything else is fully regenerated
 _SOFT_MERGE_TEMPLATES = {
@@ -32,6 +36,7 @@ _SOFT_MERGE_TEMPLATES = {
 # bump when a template's structure changes incompatibly (renamed methods, etc.)
 _TEMPLATE_VERSIONS: dict[str, int] = {
     "domain_models.py.jinja": 1,
+    "domain_enums.py.jinja": 1,
     "domain_repository.py.jinja": 1,
     "app_dtos.py.jinja": 1,
     "app_use_cases.py.jinja": 1,
@@ -70,6 +75,7 @@ def _make_env(vo_names: set[str]) -> Environment:
         return python_type
 
     env.filters["replace_vo_dto"] = replace_vo_dto
+    env.filters["repr"] = repr
     return env
 
 
@@ -133,7 +139,7 @@ def _generate_aggregate(
     extra_imports = {
         f.base_python_type
         for f in agg.fields
-        if f.base_python_type in _DATETIME_IMPORTS | {"Decimal"}
+        if f.base_python_type in _DATETIME_IMPORTS | {"Decimal", "UUID"}
     }
     sa_imports = {"String"} | {f.sa_column_type for f in agg.fields}
     if relevant_vos:
@@ -162,6 +168,9 @@ def _generate_aggregate(
     results: list[FileResult] = []
 
     for template_name, relative_path in _AGGREGATE_TEMPLATES.items():
+        if template_name in _CONDITIONAL_TEMPLATES and not relevant_enums:
+            continue
+
         rendered = env.get_template(template_name).render(**ctx)
         out_path = output_dir / relative_path
         out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -12,6 +12,9 @@ from decimal import Decimal
 {%- if has_optional or value_objects %}
 from typing import Optional
 {%- endif %}
+{%- if 'UUID' in extra_imports %}
+from uuid import UUID
+{%- endif %}
 
 from shared.database import Base
 
