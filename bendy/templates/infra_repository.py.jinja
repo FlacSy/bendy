@@ -48,6 +48,8 @@ class Sqlalchemy{{ domain_name|capitalize }}Repository({{ domain_name|capitalize
             {{ f.name }}={{ f.enum_class_name }}(row.{{ f.name }}),
 {%- elif f.is_value_object %}
             {{ f.name }}={{ f.vo_class_name }}(**row.{{ f.name }}),
+{%- elif f.base_python_type == 'UUID' %}
+            {{ f.name }}=UUID(row.{{ f.name }}),
 {%- else %}
             {{ f.name }}=row.{{ f.name }},
 {%- endif %}
@@ -57,6 +59,8 @@ class Sqlalchemy{{ domain_name|capitalize }}Repository({{ domain_name|capitalize
             {{ f.name }}={{ f.enum_class_name }}(row.{{ f.name }}) if row.{{ f.name }} is not None else None,
 {%- elif f.is_value_object %}
             {{ f.name }}={{ f.vo_class_name }}(**row.{{ f.name }}) if row.{{ f.name }} is not None else None,
+{%- elif f.base_python_type == 'UUID' %}
+            {{ f.name }}=UUID(row.{{ f.name }}) if row.{{ f.name }} is not None else None,
 {%- else %}
             {{ f.name }}=row.{{ f.name }},
 {%- endif %}
@@ -72,6 +76,10 @@ class Sqlalchemy{{ domain_name|capitalize }}Repository({{ domain_name|capitalize
             {{ f.name }}=entity.{{ f.name }}.value if entity.{{ f.name }} is not None else None,
 {%- elif f.is_value_object %}
             {{ f.name }}=dataclasses.asdict(entity.{{ f.name }}) if entity.{{ f.name }} is not None else None,
+{%- elif f.base_python_type == 'UUID' and f.nullable %}
+            {{ f.name }}=str(entity.{{ f.name }}) if entity.{{ f.name }} is not None else None,
+{%- elif f.base_python_type == 'UUID' %}
+            {{ f.name }}=str(entity.{{ f.name }}),
 {%- else %}
             {{ f.name }}=entity.{{ f.name }},
 {%- endif %}

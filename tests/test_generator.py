@@ -116,6 +116,39 @@ def test_infra_models_uuid_import(tmp_path):
     assert "customer_id: Mapped[UUID]" in content
 
 
+def test_infra_repository_uuid_field_round_trip(tmp_path):
+    out, errors = run(tmp_path, WITH_UUID)
+    assert not errors
+    content = (out / "order/infrastructure/repository.py").read_text()
+    # the column is String — a raw UUID object passed straight to the
+    # DBAPI fails; entity -> model must stringify, model -> entity must
+    # parse back
+    assert "customer_id=str(entity.customer_id)," in content
+    assert "customer_id=UUID(row.customer_id)," in content
+
+
+def test_infra_repository_optional_uuid_field(tmp_path):
+    out, errors = run(
+        tmp_path,
+        """
+from typing import Optional
+from uuid import UUID
+
+from bendy import Aggregate
+
+class Shipment(Aggregate):
+    tracking_code: str
+    carrier_id: Optional[UUID] = None
+""",
+    )
+    assert not errors
+    content = (out / "shipment/infrastructure/repository.py").read_text()
+    assert (
+        "carrier_id=str(entity.carrier_id) if entity.carrier_id is not None else None,"
+    ) in content
+    assert "carrier_id=UUID(row.carrier_id) if row.carrier_id is not None else None," in content
+
+
 def test_generated_files_are_valid_python(tmp_path):
     out, errors = run(tmp_path, SIMPLE)
     assert not errors
