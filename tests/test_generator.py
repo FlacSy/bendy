@@ -116,6 +116,15 @@ def test_infra_models_uuid_import(tmp_path):
     assert "customer_id: Mapped[UUID]" in content
 
 
+def test_infra_models_datetime_column_is_timezone_aware(tmp_path):
+    out, errors = run(tmp_path, FULL)
+    assert not errors
+    content = (out / "product/infrastructure/models.py").read_text()
+    # app_use_cases.py fills auto_now with datetime.now(timezone.utc) (aware);
+    # a naive DateTime column rejects aware values at the DBAPI level
+    assert "created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))" in content
+
+
 def test_infra_repository_uuid_field_round_trip(tmp_path):
     out, errors = run(tmp_path, WITH_UUID)
     assert not errors

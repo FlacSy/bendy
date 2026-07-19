@@ -24,5 +24,5 @@ class {{ domain_name|capitalize }}Model(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
 {%- for f in fields %}
-    {{ f.name }}: Mapped[{{ f.sa_mapped_type }}] = mapped_column({{ f.sa_column_type }}{% if f.max_length %}({{ f.max_length }}){% endif %}{% if f.nullable %}, nullable=True{% endif %}{% if f.unique %}, unique=True{% endif %}{% if f.index %}, index=True{% endif %}{% if f.has_default and f.default_repr != 'None' and not f.is_enum %}, default={{ f.default_repr }}{% endif %})
+    {{ f.name }}: Mapped[{{ f.sa_mapped_type }}] = mapped_column({{ f.sa_column_type }}{% if f.max_length %}({{ f.max_length }}){% elif f.sa_column_type == 'DateTime' %}(timezone=True){% endif %}{% if f.nullable %}, nullable=True{% endif %}{% if f.unique %}, unique=True{% endif %}{% if f.index %}, index=True{% endif %}{% if f.has_default and f.default_repr != 'None' and not f.is_enum %}, default={{ f.default_repr }}{% endif %})
 {%- endfor %}
