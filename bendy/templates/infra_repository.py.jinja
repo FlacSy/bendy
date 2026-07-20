@@ -29,6 +29,7 @@ class Sqlalchemy{{ domain_name|capitalize }}Repository({{ domain_name|capitalize
 
     async def save(self, entity: {{ domain_name|capitalize }}) -> None:
         await self._session.merge(self._to_model(entity))
+        await self._session.flush()
 
     async def delete(self, id: UUID) -> None:
         row = await self._session.get({{ domain_name|capitalize }}Model, str(id))

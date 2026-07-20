@@ -148,6 +148,61 @@ class Order(Aggregate):
     assert any("unknown operations" in e for e in result.errors)
 
 
+def test_meta_unique_together(tmp_path):
+    p = manifest(
+        tmp_path,
+        """
+from uuid import UUID
+from bendy import Aggregate
+
+class AccessRule(Aggregate):
+    credential_id: UUID
+    device_id: UUID
+
+    class Meta:
+        unique_together = [("credential_id", "device_id")]
+        index_together = [("device_id", "credential_id")]
+""",
+    )
+    result = read_manifest(p)
+    assert not result.errors
+    agg = result.aggregates[0]
+    assert agg.unique_together == [("credential_id", "device_id")]
+    assert agg.index_together == [("device_id", "credential_id")]
+
+
+def test_meta_unique_together_defaults_empty(tmp_path):
+    p = manifest(
+        tmp_path,
+        """
+from bendy import Aggregate
+
+class Order(Aggregate):
+    name: str
+""",
+    )
+    result = read_manifest(p)
+    assert result.aggregates[0].unique_together == []
+    assert result.aggregates[0].index_together == []
+
+
+def test_meta_unique_together_invalid_entry_collected(tmp_path):
+    p = manifest(
+        tmp_path,
+        """
+from bendy import Aggregate
+
+class Order(Aggregate):
+    name: str
+
+    class Meta:
+        unique_together = ["not_a_tuple"]
+""",
+    )
+    result = read_manifest(p)
+    assert any("unique_together" in e for e in result.errors)
+
+
 def test_multiple_aggregates(tmp_path):
     p = manifest(
         tmp_path,

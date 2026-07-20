@@ -144,6 +144,10 @@ def _generate_aggregate(
     sa_imports = {"String"} | {f.sa_column_type for f in agg.fields}
     if relevant_vos:
         sa_imports.add("JSON")
+    if agg.unique_together:
+        sa_imports.add("UniqueConstraint")
+    if agg.index_together:
+        sa_imports.add("Index")
 
     auto_now_fields = [f for f in agg.fields if f.auto_now]
 
@@ -159,6 +163,8 @@ def _generate_aggregate(
         "has_auto_now": bool(auto_now_fields),
         "enums": relevant_enums,
         "use_cases": agg.use_cases,
+        "unique_together": agg.unique_together,
+        "index_together": agg.index_together,
         **_vo_context(relevant_vos),
     }
 

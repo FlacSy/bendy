@@ -103,6 +103,55 @@ def test_empty_value_object():
     assert any("at least one field" in e for e in errors)
 
 
+def test_unique_together_valid():
+    fields = [_field("credential_id"), _field("device_id")]
+    agg = AggregateInfo(
+        "Order", fields, ["create"], unique_together=[("credential_id", "device_id")]
+    )
+    assert _errors(_result([agg])) == []
+
+
+def test_unique_together_unknown_field():
+    fields = [_field("credential_id"), _field("device_id")]
+    agg = AggregateInfo("Order", fields, ["create"], unique_together=[("credential_id", "nope")])
+    errors = _errors(_result([agg]))
+    assert any("unknown field" in e for e in errors)
+
+
+def test_unique_together_single_field_rejected():
+    fields = [_field("credential_id"), _field("device_id")]
+    agg = AggregateInfo("Order", fields, ["create"], unique_together=[("credential_id",)])
+    errors = _errors(_result([agg]))
+    assert any("at least 2 fields" in e for e in errors)
+
+
+def test_unique_together_duplicate_field_in_group():
+    fields = [_field("credential_id"), _field("device_id")]
+    agg = AggregateInfo(
+        "Order", fields, ["create"], unique_together=[("credential_id", "credential_id")]
+    )
+    errors = _errors(_result([agg]))
+    assert any("duplicate field name within" in e for e in errors)
+
+
+def test_unique_together_duplicate_group():
+    fields = [_field("credential_id"), _field("device_id")]
+    agg = AggregateInfo(
+        "Order",
+        fields,
+        ["create"],
+        unique_together=[("credential_id", "device_id"), ("credential_id", "device_id")],
+    )
+    errors = _errors(_result([agg]))
+    assert any("duplicate group" in e for e in errors)
+
+
+def test_index_together_allows_id_field():
+    fields = [_field("device_id")]
+    agg = AggregateInfo("Order", fields, ["create"], index_together=[("id", "device_id")])
+    assert _errors(_result([agg])) == []
+
+
 def test_multiple_errors_reported():
     # lowercase name + reserved field — both should surface
     errors = _errors(_result([AggregateInfo("order", [_field("id")], ["create"])]))

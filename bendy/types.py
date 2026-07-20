@@ -43,6 +43,8 @@ class AggregateInfo:
     name: str
     fields: list[FieldInfo]
     use_cases: list[str] = field(default_factory=lambda: list(_DEFAULT_USE_CASES))
+    unique_together: list[tuple[str, ...]] = field(default_factory=list)
+    index_together: list[tuple[str, ...]] = field(default_factory=list)
 
 
 @dataclass

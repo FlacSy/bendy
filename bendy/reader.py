@@ -52,6 +52,8 @@ def read_manifest(path: Path) -> ManifestResult:
                     name=class_name,
                     fields=_fields(class_name, cls, errors),
                     use_cases=_use_cases(class_name, cls, errors),
+                    unique_together=_composite_groups(class_name, cls, "unique_together", errors),
+                    index_together=_composite_groups(class_name, cls, "index_together", errors),
                 )
             )
 
@@ -89,3 +91,23 @@ def _use_cases(class_name: str, cls: type, errors: list[str]) -> list[str]:
     if invalid:
         errors.append(f"[{class_name}].Meta.use_cases: unknown operations: {sorted(invalid)}")
     return [uc for uc in raw if uc in _VALID_USE_CASES]
+
+
+def _composite_groups(
+    class_name: str, cls: type, attr_name: str, errors: list[str]
+) -> list[tuple[str, ...]]:
+    meta = cls.__dict__.get("Meta")
+    if meta is None:
+        return []
+
+    raw = getattr(meta, attr_name, [])
+    groups: list[tuple[str, ...]] = []
+    for entry in raw:
+        if not isinstance(entry, tuple | list) or not all(isinstance(x, str) for x in entry):
+            errors.append(
+                f"[{class_name}].Meta.{attr_name}: each entry must be a tuple of field "
+                f"names, got {entry!r}"
+            )
+            continue
+        groups.append(tuple(entry))
+    return groups

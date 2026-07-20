@@ -26,3 +26,14 @@ class {{ domain_name|capitalize }}Model(Base):
 {%- for f in fields %}
     {{ f.name }}: Mapped[{{ f.sa_mapped_type }}] = mapped_column({{ f.sa_column_type }}{% if f.max_length %}({{ f.max_length }}){% elif f.sa_column_type == 'DateTime' %}(timezone=True){% endif %}{% if f.nullable %}, nullable=True{% endif %}{% if f.unique %}, unique=True{% endif %}{% if f.index %}, index=True{% endif %}{% if f.has_default and f.default_repr != 'None' and not f.is_enum %}, default={{ f.default_repr }}{% endif %})
 {%- endfor %}
+{%- if unique_together or index_together %}
+
+    __table_args__ = (
+{%- for grp in unique_together %}
+        UniqueConstraint({% for n in grp %}"{{ n }}", {% endfor %}name="uq_{{ domain_name }}s_{{ grp | join('_') }}"),
+{%- endfor %}
+{%- for grp in index_together %}
+        Index("ix_{{ domain_name }}s_{{ grp | join('_') }}", {% for n in grp %}"{{ n }}"{% if not loop.last %}, {% endif %}{% endfor %}),
+{%- endfor %}
+    )
+{%- endif %}

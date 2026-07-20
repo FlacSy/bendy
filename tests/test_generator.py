@@ -248,3 +248,104 @@ class Order(Aggregate):
     assert not errors
     assert (out / "user/domain/models.py").exists()
     assert (out / "order/domain/models.py").exists()
+
+
+def test_infra_repository_save_flushes(tmp_path):
+    out, errors = run(tmp_path, SIMPLE)
+    assert not errors
+    content = (out / "product/infrastructure/repository.py").read_text()
+    # a duplicate-key IntegrityError must surface synchronously inside save(),
+    # before the caller's endpoint builds a response from the in-memory entity
+    assert (
+        "async def save(self, entity: Product) -> None:\n"
+        "        await self._session.merge(self._to_model(entity))\n"
+        "        await self._session.flush()\n"
+    ) in content
+
+
+COMPOSITE = """
+from uuid import UUID
+
+from bendy import Aggregate
+
+class AccessRule(Aggregate):
+    credential_id: UUID
+    device_id: UUID
+    active: bool = True
+
+    class Meta:
+        use_cases = ["create", "get", "update", "delete", "list"]
+        unique_together = [("credential_id", "device_id")]
+        index_together = [("device_id", "active")]
+"""
+
+
+def test_infra_models_unique_together_emits_table_args(tmp_path):
+    out, errors = run(tmp_path, COMPOSITE)
+    assert not errors
+    content = (out / "accessrule/infrastructure/models.py").read_text()
+    assert "from sqlalchemy import Boolean, Index, String, UniqueConstraint" in content
+    assert (
+        'UniqueConstraint("credential_id", "device_id", '
+        'name="uq_accessrules_credential_id_device_id"),'
+    ) in content
+    assert 'Index("ix_accessrules_device_id_active", "device_id", "active"),' in content
+    ast.parse(content)
+
+
+def test_infra_models_no_table_args_without_composite_meta(tmp_path):
+    out, errors = run(tmp_path, SIMPLE)
+    assert not errors
+    content = (out / "product/infrastructure/models.py").read_text()
+    assert "__table_args__" not in content
+
+
+def test_hand_edited_save_survives_regeneration(tmp_path):
+    # infra_repository.py is soft-merged: once a user customizes save() (e.g.
+    # adds audit logging around the flush), regenerating with the same or an
+    # updated manifest must not clobber it.
+    p = manifest(tmp_path, SIMPLE)
+    result = read_manifest(p)
+    out = tmp_path / "out"
+    generate(result, out)
+
+    repo_path = out / "product/infrastructure/repository.py"
+    original = repo_path.read_text()
+    assert "await self._session.flush()" in original
+
+    customized = original.replace(
+        "    async def save(self, entity: Product) -> None:\n"
+        "        await self._session.merge(self._to_model(entity))\n"
+        "        await self._session.flush()\n",
+        "    async def save(self, entity: Product) -> None:\n"
+        "        await self._session.merge(self._to_model(entity))\n"
+        "        await self._session.flush()\n"
+        "        print('audit: saved', entity.id)\n",
+    )
+    assert customized != original
+    repo_path.write_text(customized)
+
+    generate(result, out)
+    regenerated = repo_path.read_text()
+    assert "print('audit: saved', entity.id)" in regenerated
+    ast.parse(regenerated)
+
+
+def test_composite_unique_regeneration_is_idempotent(tmp_path):
+    p = manifest(tmp_path, COMPOSITE)
+    result = read_manifest(p)
+    out = tmp_path / "out"
+    generate(result, out)
+    first = (out / "accessrule/infrastructure/models.py").read_text()
+
+    agg_results = generate(result, out)
+    second = (out / "accessrule/infrastructure/models.py").read_text()
+
+    assert first == second
+    statuses = {
+        fr.relative_path: fr.status
+        for ar in agg_results
+        for fr in ar.files
+        if fr.relative_path == "infrastructure/models.py"
+    }
+    assert statuses["infrastructure/models.py"] == "unchanged"
