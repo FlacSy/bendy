@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 BENDYKIT_VERSION = "0.1.0"
 
 
@@ -16,6 +16,12 @@ class FileState:
     template_version: int
     top_level_ids: list[str]
     per_class_ids: dict[str, list[str]]
+    # Per generated method (keyed by signature_id): {"header": sha256, "body":
+    # sha256} of what we generated (see merger.method_hashes) — drives the 3-way
+    # merge in CodeMerger. Absent in schema-v1 state, which loads as empty and
+    # falls back to preserving user edits.
+    top_level_hashes: dict[str, dict[str, str]] = field(default_factory=dict)
+    per_class_hashes: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -43,6 +49,8 @@ class BendyState:
                     template_version=fs.get("template_version", 0),
                     top_level_ids=fs.get("top_level_ids", []),
                     per_class_ids=fs.get("per_class_ids", {}),
+                    top_level_hashes=fs.get("top_level_hashes", {}),
+                    per_class_hashes=fs.get("per_class_hashes", {}),
                 )
 
         return cls(
@@ -66,6 +74,11 @@ class BendyState:
                         "top_level_ids": sorted(fs.top_level_ids),
                         "per_class_ids": {
                             k: sorted(v) for k, v in sorted(fs.per_class_ids.items())
+                        },
+                        "top_level_hashes": dict(sorted(fs.top_level_hashes.items())),
+                        "per_class_hashes": {
+                            k: dict(sorted(v.items()))
+                            for k, v in sorted(fs.per_class_hashes.items())
                         },
                     }
                     for rel_path, fs in sorted(files.items())

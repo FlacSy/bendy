@@ -7,7 +7,7 @@ parses them, merges them, and checks the result.
 
 import textwrap
 
-from bendy.merger import BlockParser, CodeBlock, CodeMerger, render
+from bendy.merger import BlockParser, CodeBlock, CodeMerger, PrevGenerated, method_hashes, render
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -20,10 +20,33 @@ def parse(text: str) -> list[CodeBlock]:
     return BlockParser().parse(dedent(text))
 
 
-def merge(gen: str, user: str) -> str:
+def prev_generated(prev_gen: str) -> PrevGenerated:
+    """The PrevGenerated record (names + header/body hashes) the real generator
+    persists — i.e. what bendy generated last time."""
+    tree = parse(prev_gen)
+    return PrevGenerated(
+        top_level={b.signature_id for b in tree if b.type in ("class", "method")},
+        per_class={
+            b.signature_id: {c.signature_id for c in b.child_blocks if c.type == "method"}
+            for b in tree
+            if b.type == "class"
+        },
+        top_level_hashes={b.signature_id: method_hashes(b) for b in tree if b.type == "method"},
+        per_class_hashes={
+            b.signature_id: {
+                c.signature_id: method_hashes(c) for c in b.child_blocks if c.type == "method"
+            }
+            for b in tree
+            if b.type == "class"
+        },
+    )
+
+
+def merge(gen: str, user: str, prev_gen: str | None = None) -> str:
     parser = BlockParser()
     merger = CodeMerger()
-    tree = merger.merge(parser.parse(dedent(gen)), parser.parse(dedent(user)))
+    prev = prev_generated(prev_gen) if prev_gen is not None else None
+    tree = merger.merge(parser.parse(dedent(gen)), parser.parse(dedent(user)), prev=prev)
     return render(tree)
 
 
@@ -252,7 +275,14 @@ class TestMethodMerge:
                     result = self._repo.find(dto.id)
                     return result
         """)
-        result = merge(gen, user)
+        # user changed only the body, not the signature — so the regenerated
+        # (new-typed) signature replaces the user's old one, body is preserved.
+        prev_gen = dedent("""\
+            class UC:
+                async def execute(self, dto: OldDTO) -> OldResponse:
+                    pass
+        """)
+        result = merge(gen, user, prev_gen=prev_gen)
         # signature updated
         assert "NewDTO" in result
         assert "NewResponse" in result
@@ -340,3 +370,107 @@ class TestMethodMerge:
         assert "Order.create(data)" in result
         assert "OrderCreatedEvent" in result
         assert "self._events.publish(event)" in result
+
+
+# ─── 3-way merge: header/body preserved vs regenerated ─────────────────────────
+
+
+class TestThreeWayMerge:
+    """A method the user has edited is preserved (at header/body granularity);
+    a method they haven't touched is regenerated so template changes reach it.
+    'Touched' is decided against `prev` — what bendy generated last time."""
+
+    _ROUTE = dedent("""\
+        class R:
+            async def create(self, data: DTO) -> Resp:
+                return await uc(data)
+    """)
+
+    def test_added_decorator_survives_regen(self):
+        # bendy regenerates the same route; the user has added an auth gate.
+        user = dedent("""\
+            class R:
+                @requires_permission("write")
+                async def create(self, data: DTO) -> Resp:
+                    return await uc(data)
+        """)
+        result = merge(self._ROUTE, user, prev_gen=self._ROUTE)
+        assert '@requires_permission("write")' in result  # header edit preserved
+
+    def test_added_signature_param_survives_regen(self):
+        user = dedent("""\
+            class R:
+                async def create(self, data: DTO, session=Depends(db)) -> Resp:
+                    return await uc(data, session)
+        """)
+        result = merge(self._ROUTE, user, prev_gen=self._ROUTE)
+        assert "session=Depends(db)" in result  # signature edit preserved
+        assert "uc(data, session)" in result  # body edit preserved
+
+    def test_untouched_method_is_regenerated(self):
+        # user file identical to what we generated last time -> take new gen.
+        gen = dedent("""\
+            class R:
+                async def create(self, data: NewDTO) -> Resp:
+                    return await uc(data)
+        """)
+        result = merge(gen, self._ROUTE, prev_gen=self._ROUTE)
+        assert "NewDTO" in result  # propagated
+        assert "DTO)" not in result.replace("NewDTO", "")  # old type gone
+
+    def test_no_prev_preserves_user_method(self):
+        # first regen after upgrading to hash tracking: never clobber edits.
+        gen = dedent("""\
+            class R:
+                async def create(self, data: NewDTO) -> Resp:
+                    pass
+        """)
+        user = dedent("""\
+            class R:
+                @gate
+                async def create(self, data: DTO) -> Resp:
+                    custom()
+        """)
+        result = merge(gen, user)  # no prev
+        assert "@gate" in result and "custom()" in result
+        assert "NewDTO" not in result
+
+    def test_edited_body_keeps_body_but_regenerates_header(self):
+        # user changed only the body; a new header (added param) propagates.
+        gen = dedent("""\
+            class R:
+                async def create(self, data: DTO, ctx: Ctx) -> Resp:
+                    return await uc(data)
+        """)
+        user = dedent("""\
+            class R:
+                async def create(self, data: DTO) -> Resp:
+                    logged = audit(data)
+                    return await uc(logged)
+        """)
+        result = merge(gen, user, prev_gen=self._ROUTE)
+        assert "ctx: Ctx" in result  # untouched header regenerated
+        assert "audit(data)" in result  # edited body preserved
+
+    def test_added_multiline_decorator_arg_survives(self):
+        # the real FastAPI case: a hand-added `dependencies=[...]` inside a
+        # multi-line @router decorator must survive a regen.
+        prev_gen = dedent("""\
+            @router.get(
+                "/",
+                response_model=list[Resp],
+            )
+            async def list_items(repo=Depends(r)):
+                return await uc(repo)
+        """)
+        user = dedent("""\
+            @router.get(
+                "/",
+                response_model=list[Resp],
+                dependencies=[Depends(require_permission("read"))],
+            )
+            async def list_items(repo=Depends(r)):
+                return await uc(repo)
+        """)
+        result = merge(prev_gen, user, prev_gen=prev_gen)
+        assert 'dependencies=[Depends(require_permission("read"))]' in result

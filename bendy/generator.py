@@ -5,7 +5,7 @@ from typing import Literal
 
 from jinja2 import Environment, FileSystemLoader
 
-from .merger import BlockParser, CodeBlock, CodeMerger, PrevGenerated
+from .merger import BlockParser, CodeBlock, CodeMerger, PrevGenerated, method_hashes
 from .merger import render as _render_tree
 from .state import BendyState, FileState
 from .types import AggregateInfo, EnumInfo, ManifestResult, ValueObjectInfo
@@ -114,11 +114,23 @@ def _extract_file_state(gen_tree: list[CodeBlock], template_name: str) -> FileSt
         for b in gen_tree
         if b.type == "class"
     }
+    # Record what we generated this run, so the next merge can tell whether the
+    # user has since edited a method (hash differs) or not (hash matches).
+    top_level_hashes = {b.signature_id: method_hashes(b) for b in gen_tree if b.type == "method"}
+    per_class_hashes = {
+        b.signature_id: {
+            c.signature_id: method_hashes(c) for c in b.child_blocks if c.type == "method"
+        }
+        for b in gen_tree
+        if b.type == "class"
+    }
     return FileState(
         template=template_name,
         template_version=_TEMPLATE_VERSIONS.get(template_name, 1),
         top_level_ids=top_level_ids,
         per_class_ids=per_class_ids,
+        top_level_hashes=top_level_hashes,
+        per_class_hashes=per_class_hashes,
     )
 
 
@@ -221,6 +233,8 @@ def _generate_aggregate(
                 prev = PrevGenerated(
                     top_level=set(prev_fs.top_level_ids),
                     per_class={k: set(v) for k, v in prev_fs.per_class_ids.items()},
+                    top_level_hashes=prev_fs.top_level_hashes,
+                    per_class_hashes=prev_fs.per_class_hashes,
                 )
 
             existing = out_path.read_text()

@@ -7,7 +7,7 @@ CodeMerger behaviour across realistic DDD/FastAPI patterns.
 
 import textwrap
 
-from bendy.merger import BlockParser, CodeBlock, CodeMerger, render
+from bendy.merger import BlockParser, CodeBlock, CodeMerger, PrevGenerated, method_hashes, render
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -20,10 +20,33 @@ def parse(text: str) -> list[CodeBlock]:
     return BlockParser().parse(dedent(text))
 
 
-def do_merge(gen: str, user: str) -> str:
+def prev_generated(prev_gen: str) -> PrevGenerated:
+    """Build the PrevGenerated record (names + header/body hashes) that the real
+    generator persists in state.json — i.e. what bendy generated last time."""
+    tree = parse(prev_gen)
+    return PrevGenerated(
+        top_level={b.signature_id for b in tree if b.type in ("class", "method")},
+        per_class={
+            b.signature_id: {c.signature_id for c in b.child_blocks if c.type == "method"}
+            for b in tree
+            if b.type == "class"
+        },
+        top_level_hashes={b.signature_id: method_hashes(b) for b in tree if b.type == "method"},
+        per_class_hashes={
+            b.signature_id: {
+                c.signature_id: method_hashes(c) for c in b.child_blocks if c.type == "method"
+            }
+            for b in tree
+            if b.type == "class"
+        },
+    )
+
+
+def do_merge(gen: str, user: str, prev_gen: str | None = None) -> str:
     p = BlockParser()
     m = CodeMerger()
-    return render(m.merge(p.parse(dedent(gen)), p.parse(dedent(user))))
+    prev = prev_generated(prev_gen) if prev_gen is not None else None
+    return render(m.merge(p.parse(dedent(gen)), p.parse(dedent(user)), prev=prev))
 
 
 def ids_of(blocks: list[CodeBlock], type_: str) -> list[str]:
@@ -613,8 +636,10 @@ class TestMergerClasses:
 
 
 class TestMergerMethods:
-    def test_method_order_follows_gen(self):
-        """Merged class lists methods in gen's order regardless of user's order."""
+    def test_method_order_follows_user(self):
+        """Merged class keeps the USER's method order (so a hand-chosen layout,
+        e.g. a finder deliberately placed before the generated `list()`, is
+        preserved); shared methods are merged in place."""
         gen = dedent("""\
             class UC:
                 def alpha(self) -> None:
@@ -639,7 +664,7 @@ class TestMergerMethods:
         """)
         result = do_merge(gen, user)
         pos = {name: result.index(f"def {name}") for name in ("alpha", "beta", "gamma")}
-        assert pos["alpha"] < pos["beta"] < pos["gamma"]
+        assert pos["gamma"] < pos["alpha"] < pos["beta"]  # the user's order
         # All user bodies preserved
         for name in ("alpha", "beta", "gamma"):
             assert f"do_{name}()" in result
@@ -679,7 +704,14 @@ class TestMergerMethods:
                     self._repo = repo
                     self._cache: dict = {}
         """)
-        result = do_merge(gen, user)
+        # user hasn't touched the __init__ signature (only its body), so the new
+        # dependency propagates while the user's setup code is preserved.
+        prev_gen = dedent("""\
+            class Svc:
+                def __init__(self, repo: OrderRepository) -> None:
+                    pass
+        """)
+        result = do_merge(gen, user, prev_gen=prev_gen)
         assert "EventBus" in result  # new dependency in header
         assert "self._repo = repo" in result  # user's setup preserved
         assert "self._cache" in result
@@ -700,7 +732,14 @@ class TestMergerMethods:
                     result = self._service.run(dto)
                     return result
         """)
-        result = do_merge(gen, user)
+        # user only edited the body, not the signature, so the regenerated
+        # (multi-line, new-typed) header replaces the user's old single-line one.
+        prev_gen = dedent("""\
+            class UC:
+                async def execute(self, dto: OldDTO) -> OldResponse:
+                    pass
+        """)
+        result = do_merge(gen, user, prev_gen=prev_gen)
         assert "NewDTO" in result
         assert "RequestContext" in result
         assert "NewResponse" in result
@@ -723,8 +762,9 @@ class TestMergerMethods:
         assert "def execute(self) -> None:" in result
         assert "pass" in result
 
-    def test_new_gen_method_added_between_existing_user_methods(self):
-        """Method that exists in gen but not user is added in gen's position."""
+    def test_new_gen_method_appended_after_user_methods(self):
+        """A method that exists in gen but not the user is appended after the
+        user's own methods (which keep their hand-chosen order)."""
         gen = dedent("""\
             class UC:
                 def setup(self) -> None:
@@ -750,8 +790,8 @@ class TestMergerMethods:
         assert "do_teardown()" in result
         assert (
             result.index("def setup")
-            < result.index("def new_method")
             < result.index("def teardown")
+            < result.index("def new_method")
         )
 
     def test_user_method_with_decorator_preserved(self):
@@ -779,7 +819,7 @@ class TestMergerMethods:
         After each merge the user's code is preserved and only
         headers/new methods change.
         """
-        _ = dedent("""\
+        gen_v1 = dedent("""\
             class OrderUC:
                 def __init__(self, repo: OrderRepo) -> None:
                     pass
@@ -826,8 +866,11 @@ class TestMergerMethods:
         p = BlockParser()
         m = CodeMerger()
 
-        # Cycle 2: gen_v2 + user_after_v1
-        merged_v2 = render(m.merge(p.parse(dedent(gen_v2)), p.parse(user_after_v1)))
+        # Cycle 2: gen_v2 + user_after_v1 (prev = what we generated as v1). The
+        # user never touched the __init__ signature, so `cache` propagates.
+        merged_v2 = render(
+            m.merge(p.parse(dedent(gen_v2)), p.parse(user_after_v1), prev=prev_generated(gen_v1))
+        )
 
         assert "Cache" in merged_v2  # new dep in signature
         assert "self._repo = repo" in merged_v2  # user setup preserved
@@ -851,8 +894,10 @@ class TestMergerMethods:
                     await self._repo.delete(id)
         """)
 
-        # Cycle 3: gen_v3 + user's v2 file
-        merged_v3 = render(m.merge(p.parse(dedent(gen_v3)), p.parse(user_after_v2)))
+        # Cycle 3: gen_v3 + user's v2 file (prev = what we generated as v2).
+        merged_v3 = render(
+            m.merge(p.parse(dedent(gen_v3)), p.parse(user_after_v2), prev=prev_generated(gen_v2))
+        )
 
         assert "EventBus" in merged_v3  # new dep in v3
         assert "self._repo = repo" in merged_v3  # still there

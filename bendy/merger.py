@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 
 
@@ -7,6 +8,13 @@ from dataclasses import dataclass, field
 class PrevGenerated:
     top_level: set[str]
     per_class: dict[str, set[str]]
+    # content hashes of what was generated last time, per signature_id — used for
+    # a 3-way merge: a method the user hasn't touched (its current hash still
+    # matches what we generated) is regenerated so template/field changes reach
+    # it; a method the user has edited is preserved verbatim (decorators,
+    # signature and body), so hand-added auth gates / params / logic survive.
+    top_level_hashes: dict[str, dict[str, str]] = field(default_factory=dict)
+    per_class_hashes: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -21,6 +29,28 @@ class CodeBlock:
 
 def _indent_of(line: str) -> int:
     return len(line) - len(line.lstrip(" "))
+
+
+def _hash(lines: list[str]) -> str:
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()
+
+
+def header_hash(block: CodeBlock) -> str:
+    """Hash of a method's header — decorators + signature."""
+    return _hash(block.header_lines)
+
+
+def body_hash(block: CodeBlock) -> str:
+    """Hash of a method's body."""
+    return _hash(block.body_lines)
+
+
+def method_hashes(block: CodeBlock) -> dict[str, str]:
+    """Header+body hashes recorded for a generated method, for the next merge's
+    3-way. Header and body are tracked separately so a user's edit to one part
+    (e.g. an added auth-gate decorator) is preserved while the other part still
+    picks up template/field changes."""
+    return {"header": header_hash(block), "body": body_hash(block)}
 
 
 def _extract_name(lines: list[str]) -> str:
@@ -94,8 +124,19 @@ class BlockParser:
 
             if stripped.startswith("@"):
                 flush_raw()
+                # a decorator may span multiple lines (e.g. FastAPI's
+                # `@router.get(\n    ...,\n    dependencies=[...],\n)`); consume
+                # the whole call so the entire decorator stays attached to the
+                # method it decorates (part of its header_lines) rather than
+                # leaking into a raw_text block — otherwise a merge can't tell
+                # which method a hand-edited decorator belongs to.
                 decorators.append(line)
+                balance = line.count("(") - line.count(")")
                 i += 1
+                while balance > 0 and i < len(lines):
+                    decorators.append(lines[i])
+                    balance += lines[i].count("(") - lines[i].count(")")
+                    i += 1
                 continue
 
             if stripped.startswith("import ") or stripped.startswith("from "):
@@ -264,20 +305,20 @@ class CodeMerger:
                             prev_method_ids=(
                                 prev.per_class.get(block.signature_id) if prev else None
                             ),
+                            prev_method_hashes=(
+                                prev.per_class_hashes.get(block.signature_id) if prev else None
+                            ),
                         )
                     )
                 else:
                     result.append(block)
             elif block.type == "method":
                 if block.signature_id in user_top_methods:
-                    user_m = user_top_methods[block.signature_id]
                     result.append(
-                        CodeBlock(
-                            type="method",
-                            signature_id=block.signature_id,
-                            header_lines=block.header_lines,
-                            body_lines=user_m.body_lines,
-                            indent_level=block.indent_level,
+                        self._pick_method(
+                            block,
+                            user_top_methods[block.signature_id],
+                            prev.top_level_hashes.get(block.signature_id) if prev else None,
                         )
                     )
                 else:
@@ -312,11 +353,48 @@ class CodeMerger:
                 result.append(block)
         return result
 
+    def _pick_method(
+        self,
+        gen_block: CodeBlock,
+        user_block: CodeBlock,
+        prev: dict[str, str] | None,
+    ) -> CodeBlock:
+        """3-way merge of a method present in both trees, at header/body
+        granularity. For each part: if the user's current content still matches
+        what we generated last time (`prev`), they haven't touched it → take the
+        fresh gen part so template/field changes propagate; otherwise keep the
+        user's part, so hand-edited decorators (auth gates, `response_model`),
+        signatures (extra params) and bodies survive. With no recorded prev hash
+        (first regen after upgrading to hash-tracking, or brand-new tracking)
+        the user's part is preserved — never silently clobber an edit."""
+        prev = prev or {}
+        prev_header = prev.get("header")
+        prev_body = prev.get("body")
+
+        header = (
+            gen_block.header_lines
+            if prev_header is not None and header_hash(user_block) == prev_header
+            else user_block.header_lines
+        )
+        body = (
+            gen_block.body_lines
+            if prev_body is not None and body_hash(user_block) == prev_body
+            else user_block.body_lines
+        )
+        return CodeBlock(
+            type="method",
+            signature_id=gen_block.signature_id,
+            header_lines=header,
+            body_lines=body,
+            indent_level=gen_block.indent_level,
+        )
+
     def _merge_class(
         self,
         gen_cls: CodeBlock,
         user_cls: CodeBlock,
         prev_method_ids: set[str] | None = None,
+        prev_method_hashes: dict[str, str] | None = None,
     ) -> CodeBlock:
         return CodeBlock(
             type="class",
@@ -328,6 +406,7 @@ class CodeMerger:
                 gen_cls.child_blocks,
                 user_cls.child_blocks,
                 prev_method_ids=prev_method_ids,
+                prev_method_hashes=prev_method_hashes,
             ),
         )
 
@@ -336,6 +415,7 @@ class CodeMerger:
         gen_children: list[CodeBlock],
         user_children: list[CodeBlock],
         prev_method_ids: set[str] | None = None,
+        prev_method_hashes: dict[str, str] | None = None,
     ) -> list[CodeBlock]:
         result: list[CodeBlock] = []
 
@@ -353,28 +433,32 @@ class CodeMerger:
         result.extend(user_raw if user_has_content else gen_raw)
 
         stale_methods: set[str] = (prev_method_ids or set()) - gen_methods.keys()
+        prev_hashes = prev_method_hashes or {}
+        emitted: set[str] = set()
 
+        # Emit methods in the USER's order, so a user's own methods keep the
+        # position they hand-placed them at (e.g. a finder deliberately declared
+        # *before* the generated `list()` to avoid the `list`-shadows-builtin
+        # trap). Shared methods are 3-way merged in place; user-only methods are
+        # kept verbatim.
+        for block in user_children:
+            if block.type != "method":
+                continue
+            sid = block.signature_id
+            if sid in gen_methods:
+                result.append(self._pick_method(gen_methods[sid], block, prev_hashes.get(sid)))
+                emitted.add(sid)
+            elif sid not in stale_methods:
+                result.append(block)
+                emitted.add(sid)
+
+        # Then append newly-generated methods the user doesn't have yet, in
+        # generation order.
         for block in gen_children:
             if block.type != "method":
                 continue
-            if block.signature_id in user_methods:
-                user_m = user_methods[block.signature_id]
-                result.append(
-                    CodeBlock(
-                        type="method",
-                        signature_id=block.signature_id,
-                        header_lines=block.header_lines,
-                        body_lines=user_m.body_lines,
-                        indent_level=block.indent_level,
-                    )
-                )
-            else:
+            if block.signature_id not in emitted and block.signature_id not in user_methods:
                 result.append(block)
-
-        for block in user_children:
-            if block.type == "method" and block.signature_id not in gen_methods:
-                if block.signature_id not in stale_methods:
-                    result.append(block)
 
         return result
 
