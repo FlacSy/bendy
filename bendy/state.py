@@ -22,6 +22,8 @@ class FileState:
     # falls back to preserving user edits.
     top_level_hashes: dict[str, dict[str, str]] = field(default_factory=dict)
     per_class_hashes: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    # whole-class content hash (class_id -> sha256) for the class-level 3-way.
+    top_level_class_hashes: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -51,6 +53,7 @@ class BendyState:
                     per_class_ids=fs.get("per_class_ids", {}),
                     top_level_hashes=fs.get("top_level_hashes", {}),
                     per_class_hashes=fs.get("per_class_hashes", {}),
+                    top_level_class_hashes=fs.get("top_level_class_hashes", {}),
                 )
 
         return cls(
@@ -80,6 +83,7 @@ class BendyState:
                             k: dict(sorted(v.items()))
                             for k, v in sorted(fs.per_class_hashes.items())
                         },
+                        "top_level_class_hashes": dict(sorted(fs.top_level_class_hashes.items())),
                     }
                     for rel_path, fs in sorted(files.items())
                 }

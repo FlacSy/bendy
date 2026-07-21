@@ -5,7 +5,7 @@ from typing import Literal
 
 from jinja2 import Environment, FileSystemLoader
 
-from .merger import BlockParser, CodeBlock, CodeMerger, PrevGenerated, method_hashes
+from .merger import BlockParser, CodeBlock, CodeMerger, PrevGenerated, class_hash, method_hashes
 from .merger import render as _render_tree
 from .state import BendyState, FileState
 from .types import AggregateInfo, EnumInfo, ManifestResult, ValueObjectInfo
@@ -28,6 +28,7 @@ _CONDITIONAL_TEMPLATES = {"domain_enums.py.jinja"}
 
 # soft-merge preserves user logic; everything else is fully regenerated
 _SOFT_MERGE_TEMPLATES = {
+    "app_dtos.py.jinja",
     "app_use_cases.py.jinja",
     "router.py.jinja",
     "infra_repository.py.jinja",
@@ -124,6 +125,7 @@ def _extract_file_state(gen_tree: list[CodeBlock], template_name: str) -> FileSt
         for b in gen_tree
         if b.type == "class"
     }
+    top_level_class_hashes = {b.signature_id: class_hash(b) for b in gen_tree if b.type == "class"}
     return FileState(
         template=template_name,
         template_version=_TEMPLATE_VERSIONS.get(template_name, 1),
@@ -131,6 +133,7 @@ def _extract_file_state(gen_tree: list[CodeBlock], template_name: str) -> FileSt
         per_class_ids=per_class_ids,
         top_level_hashes=top_level_hashes,
         per_class_hashes=per_class_hashes,
+        top_level_class_hashes=top_level_class_hashes,
     )
 
 
@@ -235,6 +238,7 @@ def _generate_aggregate(
                     per_class={k: set(v) for k, v in prev_fs.per_class_ids.items()},
                     top_level_hashes=prev_fs.top_level_hashes,
                     per_class_hashes=prev_fs.per_class_hashes,
+                    top_level_class_hashes=prev_fs.top_level_class_hashes,
                 )
 
             existing = out_path.read_text()

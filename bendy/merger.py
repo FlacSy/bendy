@@ -15,6 +15,8 @@ class PrevGenerated:
     # signature and body), so hand-added auth gates / params / logic survive.
     top_level_hashes: dict[str, dict[str, str]] = field(default_factory=dict)
     per_class_hashes: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    # whole-class content hash (class_id -> sha256), for the class-level 3-way.
+    top_level_class_hashes: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -51,6 +53,15 @@ def method_hashes(block: CodeBlock) -> dict[str, str]:
     (e.g. an added auth-gate decorator) is preserved while the other part still
     picks up template/field changes."""
     return {"header": header_hash(block), "body": body_hash(block)}
+
+
+def class_hash(block: CodeBlock) -> str:
+    """Hash of a whole class (header + every field/method), for a class-level
+    3-way. A class the user hasn't touched can be regenerated wholesale so
+    manifest field changes reach it (relevant for field-only classes like DTOs
+    and dataclasses, which have no per-method merge to hang edits on); a class
+    they've edited falls back to the per-method merge that preserves edits."""
+    return hashlib.sha256(render([block]).encode()).hexdigest()
 
 
 def _extract_name(lines: list[str]) -> str:
@@ -298,18 +309,28 @@ class CodeMerger:
                 continue
             if block.type == "class":
                 if block.signature_id in user_classes:
-                    result.append(
-                        self._merge_class(
-                            block,
-                            user_classes[block.signature_id],
-                            prev_method_ids=(
-                                prev.per_class.get(block.signature_id) if prev else None
-                            ),
-                            prev_method_hashes=(
-                                prev.per_class_hashes.get(block.signature_id) if prev else None
-                            ),
-                        )
+                    user_cls = user_classes[block.signature_id]
+                    prev_cls_hash = (
+                        prev.top_level_class_hashes.get(block.signature_id) if prev else None
                     )
+                    if prev_cls_hash is not None and class_hash(user_cls) == prev_cls_hash:
+                        # class untouched since last generation -> regenerate it
+                        # wholesale, so field/method changes from the manifest
+                        # reach it even for field-only classes (DTOs, dataclasses).
+                        result.append(block)
+                    else:
+                        result.append(
+                            self._merge_class(
+                                block,
+                                user_cls,
+                                prev_method_ids=(
+                                    prev.per_class.get(block.signature_id) if prev else None
+                                ),
+                                prev_method_hashes=(
+                                    prev.per_class_hashes.get(block.signature_id) if prev else None
+                                ),
+                            )
+                        )
                 else:
                     result.append(block)
             elif block.type == "method":

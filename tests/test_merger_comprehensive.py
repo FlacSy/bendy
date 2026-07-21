@@ -7,7 +7,15 @@ CodeMerger behaviour across realistic DDD/FastAPI patterns.
 
 import textwrap
 
-from bendy.merger import BlockParser, CodeBlock, CodeMerger, PrevGenerated, method_hashes, render
+from bendy.merger import (
+    BlockParser,
+    CodeBlock,
+    CodeMerger,
+    PrevGenerated,
+    class_hash,
+    method_hashes,
+    render,
+)
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -39,6 +47,7 @@ def prev_generated(prev_gen: str) -> PrevGenerated:
             for b in tree
             if b.type == "class"
         },
+        top_level_class_hashes={b.signature_id: class_hash(b) for b in tree if b.type == "class"},
     )
 
 
