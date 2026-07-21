@@ -30,6 +30,7 @@ _CONDITIONAL_TEMPLATES = {"domain_enums.py.jinja"}
 _SOFT_MERGE_TEMPLATES = {
     "app_dtos.py.jinja",
     "app_use_cases.py.jinja",
+    "domain_repository.py.jinja",
     "router.py.jinja",
     "infra_repository.py.jinja",
 }

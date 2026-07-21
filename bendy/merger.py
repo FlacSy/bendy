@@ -64,6 +64,37 @@ def class_hash(block: CodeBlock) -> str:
     return hashlib.sha256(render([block]).encode()).hexdigest()
 
 
+def _parse_import(block: CodeBlock) -> tuple[str | None, frozenset[str]]:
+    """`from MODULE import a, b as c` -> ("MODULE", {"a", "c"}); a plain
+    `import X [as Y]` (or anything unparseable) -> (None, {the statement}).
+    Used to decide whether a generated import is already satisfied by the user's
+    imports (same module, its names a superset), so an edited import line — e.g.
+    `from pydantic import ...` with an extra name the user added — isn't
+    duplicated, while a genuinely new import still gets added."""
+    text = " ".join(line.strip() for line in block.header_lines).replace("(", " ").replace(")", " ")
+    if text.startswith("from "):
+        module, sep, names_part = text[5:].partition(" import ")
+        if sep:
+            names = frozenset(
+                n.strip().split(" as ")[-1].strip() for n in names_part.split(",") if n.strip()
+            )
+            return module.strip(), names
+    return None, frozenset({text.strip()})
+
+
+def _import_satisfied_by(
+    gen_block: CodeBlock, user_parsed: list[tuple[str | None, frozenset[str]]]
+) -> bool:
+    gen_module, gen_names = _parse_import(gen_block)
+    for user_module, user_names in user_parsed:
+        if gen_module is None:
+            if user_module is None and gen_names == user_names:
+                return True
+        elif user_module == gen_module and gen_names <= user_names:
+            return True
+    return False
+
+
 def _extract_name(lines: list[str]) -> str:
     for line in lines:
         s = line.lstrip()
@@ -283,9 +314,15 @@ class CodeMerger:
     ) -> list[CodeBlock]:
         result: list[CodeBlock] = []
 
-        gen_imports = [b for b in gen_tree if b.type == "import"]
-        user_imports = [b for b in user_tree if b.type == "import"]
-        result.extend(self._merge_imports(gen_imports, user_imports))
+        # Imports are kept in their user-file positions (so blank lines between
+        # import groups survive); newly-generated imports the user doesn't have
+        # are injected right after the last existing import (see below).
+        user_parsed_imports = [_parse_import(b) for b in user_tree if b.type == "import"]
+        gen_only_imports = [
+            b
+            for b in gen_tree
+            if b.type == "import" and not _import_satisfied_by(b, user_parsed_imports)
+        ]
 
         gen_classes: dict[str, CodeBlock] = {
             b.signature_id: b for b in gen_tree if b.type == "class"
@@ -304,74 +341,73 @@ class CodeMerger:
         if prev:
             stale = prev.top_level - gen_classes.keys() - gen_top_methods.keys()
 
-        for block in gen_tree:
+        # Walk the USER file in order, so its layout — the position of each
+        # class/function AND the blank lines and comments between them — is
+        # preserved; shared blocks are merged in place, user-only blocks kept
+        # (unless stale), raw blocks (spacing, hand comments) passed through.
+        emitted: set[str] = set()
+        last_import_pos = 0
+        for block in user_tree:
             if block.type == "import":
+                result.append(block)
+                last_import_pos = len(result)
                 continue
             if block.type == "class":
-                if block.signature_id in user_classes:
-                    user_cls = user_classes[block.signature_id]
-                    prev_cls_hash = (
-                        prev.top_level_class_hashes.get(block.signature_id) if prev else None
-                    )
-                    if prev_cls_hash is not None and class_hash(user_cls) == prev_cls_hash:
-                        # class untouched since last generation -> regenerate it
-                        # wholesale, so field/method changes from the manifest
-                        # reach it even for field-only classes (DTOs, dataclasses).
-                        result.append(block)
+                sid = block.signature_id
+                if sid in gen_classes:
+                    prev_cls_hash = prev.top_level_class_hashes.get(sid) if prev else None
+                    if prev_cls_hash is not None and class_hash(block) == prev_cls_hash:
+                        # untouched since last generation -> regenerate wholesale,
+                        # so manifest field/method changes reach it (matters for
+                        # field-only classes like DTOs/dataclasses).
+                        result.append(gen_classes[sid])
                     else:
                         result.append(
                             self._merge_class(
+                                gen_classes[sid],
                                 block,
-                                user_cls,
-                                prev_method_ids=(
-                                    prev.per_class.get(block.signature_id) if prev else None
-                                ),
+                                prev_method_ids=(prev.per_class.get(sid) if prev else None),
                                 prev_method_hashes=(
-                                    prev.per_class_hashes.get(block.signature_id) if prev else None
+                                    prev.per_class_hashes.get(sid) if prev else None
                                 ),
                             )
                         )
-                else:
-                    result.append(block)
+                    emitted.add(sid)
+                elif sid not in stale:
+                    result.append(block)  # user-only class, kept in position
+                    emitted.add(sid)
             elif block.type == "method":
-                if block.signature_id in user_top_methods:
+                sid = block.signature_id
+                if sid in gen_top_methods:
                     result.append(
                         self._pick_method(
+                            gen_top_methods[sid],
                             block,
-                            user_top_methods[block.signature_id],
-                            prev.top_level_hashes.get(block.signature_id) if prev else None,
+                            prev.top_level_hashes.get(sid) if prev else None,
                         )
                     )
-                else:
-                    result.append(block)
+                    emitted.add(sid)
+                elif sid not in stale:
+                    result.append(block)  # user-only function, kept in position
+                    emitted.add(sid)
             else:
-                result.append(block)
+                result.append(block)  # raw: blank lines / hand comments, in place
 
-        for block in user_tree:
-            if block.type == "class" and block.signature_id not in gen_classes:
-                if block.signature_id not in stale:
+        # Inject newly-generated imports right after the user's last import
+        # (keeps them in the import block, ahead of any code).
+        for offset, imp in enumerate(gen_only_imports):
+            result.insert(last_import_pos + offset, imp)
+
+        # Append newly-generated top-level classes/functions the user doesn't
+        # have yet, in generation order.
+        for block in gen_tree:
+            if block.type in ("class", "method") and block.signature_id not in emitted:
+                if (
+                    block.signature_id not in user_classes
+                    and block.signature_id not in user_top_methods
+                ):
                     result.append(block)
-            elif block.type == "method" and block.signature_id not in gen_top_methods:
-                if block.signature_id not in stale:
-                    result.append(block)
 
-        return result
-
-    def _merge_imports(
-        self,
-        gen_imports: list[CodeBlock],
-        user_imports: list[CodeBlock],
-    ) -> list[CodeBlock]:
-        seen: set[str] = set()
-        result: list[CodeBlock] = []
-        for block in user_imports:
-            if block.signature_id not in seen:
-                seen.add(block.signature_id)
-                result.append(block)
-        for block in gen_imports:
-            if block.signature_id not in seen:
-                seen.add(block.signature_id)
-                result.append(block)
         return result
 
     def _pick_method(
@@ -447,31 +483,25 @@ class CodeMerger:
             b.signature_id: b for b in user_children if b.type == "method"
         }
 
-        user_raw = [b for b in user_children if b.type != "method"]
-        gen_raw = [b for b in gen_children if b.type != "method"]
-        # a raw_text block of only blank lines doesn't count as user content
-        user_has_content = any(any(line.strip() for line in b.body_lines) for b in user_raw)
-        result.extend(user_raw if user_has_content else gen_raw)
-
         stale_methods: set[str] = (prev_method_ids or set()) - gen_methods.keys()
         prev_hashes = prev_method_hashes or {}
         emitted: set[str] = set()
 
-        # Emit methods in the USER's order, so a user's own methods keep the
-        # position they hand-placed them at (e.g. a finder deliberately declared
-        # *before* the generated `list()` to avoid the `list`-shadows-builtin
-        # trap). Shared methods are 3-way merged in place; user-only methods are
-        # kept verbatim.
+        # Walk the user's class body in order: methods are 3-way merged in place
+        # (a hand-placed method keeps its position, e.g. a finder before the
+        # generated `list()`), user-only methods are kept, and raw blocks (blank
+        # lines, hand comments) pass through so the layout is preserved.
         for block in user_children:
-            if block.type != "method":
-                continue
-            sid = block.signature_id
-            if sid in gen_methods:
-                result.append(self._pick_method(gen_methods[sid], block, prev_hashes.get(sid)))
-                emitted.add(sid)
-            elif sid not in stale_methods:
-                result.append(block)
-                emitted.add(sid)
+            if block.type == "method":
+                sid = block.signature_id
+                if sid in gen_methods:
+                    result.append(self._pick_method(gen_methods[sid], block, prev_hashes.get(sid)))
+                    emitted.add(sid)
+                elif sid not in stale_methods:
+                    result.append(block)
+                    emitted.add(sid)
+            else:
+                result.append(block)  # raw: blank lines / hand comments, in place
 
         # Then append newly-generated methods the user doesn't have yet, in
         # generation order.

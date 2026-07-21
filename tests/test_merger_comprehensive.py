@@ -520,7 +520,9 @@ class TestMergerImports:
 
 
 class TestMergerClasses:
-    def test_gen_order_determines_class_order(self):
+    def test_class_order_follows_user(self):
+        """Top-level layout follows the user's file order (preserves a
+        hand-chosen arrangement), like methods within a class."""
         gen = dedent("""\
             class A:
                 def m(self) -> None:
@@ -540,7 +542,7 @@ class TestMergerClasses:
                     do_a()
         """)
         result = do_merge(gen, user)
-        assert result.index("class A") < result.index("class B")
+        assert result.index("class B") < result.index("class A")  # the user's order
 
     def test_user_class_docstring_wins_over_gen(self):
         gen = dedent("""\
@@ -561,7 +563,10 @@ class TestMergerClasses:
         assert "User's improved docstring." in result
         assert "Generated docstring." not in result
 
-    def test_gen_docstring_used_when_user_has_none(self):
+    def test_removed_class_docstring_not_reinstated(self):
+        """The merge preserves the user's class-body layout verbatim: a docstring
+        (or comment) the user removed from an edited class stays removed, rather
+        than being silently re-added from the template."""
         gen = dedent("""\
             class UC:
                 \"\"\"Generated docstring.\"\"\"
@@ -575,7 +580,8 @@ class TestMergerClasses:
                     do_work()
         """)
         result = do_merge(gen, user)
-        assert "Generated docstring." in result
+        assert "Generated docstring." not in result
+        assert "do_work()" in result
 
     def test_class_bases_updated_from_gen(self):
         gen = dedent("""\
