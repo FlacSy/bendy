@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from dataclasses import replace
 {%- endif %}
 
+{%- if 'get' in use_cases or 'update' in use_cases or 'delete' in use_cases %}
+from ..domain.exceptions import NotFoundError
+{%- endif %}
 from ..domain.models import {{ domain_name|capitalize }}
 from ..domain.repository import {{ domain_name|capitalize }}Repository
 from .dtos import (
@@ -47,7 +50,7 @@ class Get{{ domain_name|capitalize }}UseCase:
     async def execute(self, id: UUID) -> {{ domain_name|capitalize }}Response:
         entity = await self._repository.get_by_id(id)
         if entity is None:
-            raise ValueError(f"{{ domain_name|capitalize }} {id} not found")
+            raise NotFoundError(f"{{ domain_name|capitalize }} {id} not found")
         return {{ domain_name|capitalize }}Response.model_validate(entity)
 {%- endif %}
 {%- if 'update' in use_cases %}
@@ -60,7 +63,7 @@ class Update{{ domain_name|capitalize }}UseCase:
     async def execute(self, id: UUID, data: {{ domain_name|capitalize }}Update) -> {{ domain_name|capitalize }}Response:
         entity = await self._repository.get_by_id(id)
         if entity is None:
-            raise ValueError(f"{{ domain_name|capitalize }} {id} not found")
+            raise NotFoundError(f"{{ domain_name|capitalize }} {id} not found")
         updated = replace(entity, **data.model_dump(exclude_unset=True))
         await self._repository.save(updated)
         return {{ domain_name|capitalize }}Response.model_validate(updated)
@@ -75,7 +78,7 @@ class Delete{{ domain_name|capitalize }}UseCase:
     async def execute(self, id: UUID) -> None:
         entity = await self._repository.get_by_id(id)
         if entity is None:
-            raise ValueError(f"{{ domain_name|capitalize }} {id} not found")
+            raise NotFoundError(f"{{ domain_name|capitalize }} {id} not found")
         await self._repository.delete(id)
 {%- endif %}
 {%- if 'list' in use_cases %}

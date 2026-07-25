@@ -6,7 +6,7 @@ and checks the filesystem state after each run.
 
 Phase 1 — First generation
     Manifest v1 (Task: title, done).
-    Assert all 7 files exist, contain correct classes/fields, are valid Python.
+    Assert all 8 files exist, contain correct classes/fields, are valid Python.
 
 Phase 2 — User edits + idempotent re-generation (same manifest)
     User writes business logic into use_cases.py (custom validation + helper method).
@@ -154,7 +154,7 @@ def test_cli_full_lifecycle(tmp_path: Path) -> None:
     proc = run_cli(manifest, output)
 
     assert proc.returncode == 0, f"CLI failed:\n{proc.stderr}"
-    assert "7 files generated" in proc.stdout
+    assert "8 files generated" in proc.stdout
 
     # All expected files exist
     for path in [models_path, dtos_path, use_cases_path, router_path, infra_repo_path]:

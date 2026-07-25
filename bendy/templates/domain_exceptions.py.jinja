@@ -1,0 +1,8 @@
+class NotFoundError(LookupError):
+    """Raised by the generated get/update/delete use cases when no
+    {{ domain_name|capitalize }} exists for the requested id.
+
+    Subclasses the stdlib LookupError on purpose: every aggregate generates
+    its own NotFoundError, so a host application can register one exception
+    handler for LookupError and map all of them to an HTTP 404 without
+    importing each generated class."""

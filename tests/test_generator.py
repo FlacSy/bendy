@@ -349,3 +349,26 @@ def test_composite_unique_regeneration_is_idempotent(tmp_path):
         if fr.relative_path == "infrastructure/models.py"
     }
     assert statuses["infrastructure/models.py"] == "unchanged"
+
+
+def test_not_found_error_generated_and_raised(tmp_path):
+    """STAB-10 (PuzNode): a missing record must be mappable to HTTP 404.
+
+    Each aggregate generates domain/exceptions.py with NotFoundError
+    subclassing LookupError — one stdlib base, so a host app registers a
+    single exception handler instead of importing N generated classes — and
+    the get/update/delete use cases raise it instead of a bare ValueError
+    (which no app can safely blanket-map to 404)."""
+    out, errors = run(tmp_path, SIMPLE)
+    assert not errors
+
+    exceptions_src = (out / "product/domain/exceptions.py").read_text()
+    tree = ast.parse(exceptions_src)
+    cls = next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef))
+    assert cls.name == "NotFoundError"
+    assert [b.id for b in cls.bases] == ["LookupError"]
+
+    use_cases = (out / "product/application/use_cases.py").read_text()
+    assert "from ..domain.exceptions import NotFoundError" in use_cases
+    assert "raise NotFoundError(" in use_cases
+    assert "raise ValueError(" not in use_cases

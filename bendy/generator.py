@@ -15,6 +15,7 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _AGGREGATE_TEMPLATES = {
     "domain_models.py.jinja": "domain/models.py",
     "domain_enums.py.jinja": "domain/enums.py",
+    "domain_exceptions.py.jinja": "domain/exceptions.py",
     "domain_repository.py.jinja": "domain/repository.py",
     "app_dtos.py.jinja": "application/dtos.py",
     "app_use_cases.py.jinja": "application/use_cases.py",
@@ -39,6 +40,7 @@ _SOFT_MERGE_TEMPLATES = {
 _TEMPLATE_VERSIONS: dict[str, int] = {
     "domain_models.py.jinja": 1,
     "domain_enums.py.jinja": 1,
+    "domain_exceptions.py.jinja": 1,
     "domain_repository.py.jinja": 1,
     "app_dtos.py.jinja": 1,
     "app_use_cases.py.jinja": 1,
